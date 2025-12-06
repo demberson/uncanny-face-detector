@@ -6,7 +6,16 @@ from mtcnn import MTCNN
 from train_pca import load_data
 
 # number of principle components (can be adjusted to change accuracy/creepiness of faces)
-n_components = 20
+n_components = 100
+
+BLUR_AMOUNT = 5
+NOISE_LEVEL = 15
+
+def add_grain(image, intensity=10):
+    h, w = image.shape
+    noise = np.random.normal(0, intensity, (h, w)).astype('uint8')
+    grainy = cv2.add(image, noise)
+    return grainy
 
 def process_image(image_path, pca_model_path='models/pca_model.pkl'):
     # load pca model
@@ -16,18 +25,18 @@ def process_image(image_path, pca_model_path='models/pca_model.pkl'):
     # get reference dimensions from dataset
     lfw_people = load_data()
     _, h, w = lfw_people.images.shape
-    print(f"Required input size: {h}x{w}")
 
     # load user image
     img = cv2.imread(image_path)
     if img is None:
-        print(f"Error: Could not load image from {image_path}")
+        print(f"Error loading image.")
         return
     
-    # convert from BGR to RGB
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    # make image grayscale
+    img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     # detect face
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     detector = MTCNN()
     results = detector.detect_faces(img_rgb)
 
@@ -42,52 +51,49 @@ def process_image(image_path, pca_model_path='models/pca_model.pkl'):
     y1, y2 = max(0, y), min(img.shape[0], y + height)
     x1, x2 = max(0, x), min(img.shape[1], x + width)
 
-    face_region = img_rgb[y1:y2, x1:x2]
+    face_region = img_gray[y1:y2, x1:x2]
 
     # pre-process for PCA
-    face_gray = cv2.cvtColor(face_region, cv2.COLOR_RGB2GRAY)
-    face_resized = cv2.resize(face_gray, (w, h))
+    face_resized = cv2.resize(face_region, (w, h))
     face_flat = face_resized.reshape(1, -1)
 
     # project face into eigenspace
     components = pca.transform(face_flat)
 
     # zero out all components after chosen number of components
-    components_filtered = components.copy()
-    components_filtered[:, n_components:] = 0
+    components[:, n_components:] = 0
 
     # reconstruct faces w/ limited components
-    reconstruction = pca.inverse_transform(components_filtered)
+    reconstruction = pca.inverse_transform(components)
     reconstruction = reconstruction.reshape(h, w)
 
     # post-processing
     # resize image back to original size
     uncanny_face = cv2.resize(reconstruction, (x2-x1, y2-y1))
-
-    # normalize pixel values
     uncanny_face = cv2.normalize(uncanny_face, None, 0, 255, cv2.NORM_MINMAX).astype('uint8')
 
-    # convert back to color
-    uncanny_face_color = cv2.cvtColor(uncanny_face, cv2.COLOR_GRAY2RGB)
-
     # masking
-    final_image = img_rgb.copy()
-    final_image[y1:y2, x1:x2] = uncanny_face_color
+    mask = np.zeros_like(uncanny_face)
+    center = (mask.shape[1] // 2, mask.shape[0] // 2)
+    axes = (mask.shape[1] // 2, mask.shape[0] // 2)
+    cv2.ellipse(mask, center, axes, 0, 0, 360, (255), -1)
 
-    # show results
+    # blur
+    mask = cv2.GaussianBlur(mask, (21, 21), 0) / 255.0
+
+    # create final image
+    final_face = (uncanny_face * mask + face_region * (1.0 - mask)).astype('uint8')
+    final_image = img_gray.copy()
+    final_image = cv2.GaussianBlur(final_image, (BLUR_AMOUNT, BLUR_AMOUNT), 0)
+    final_image[y1:y2, x1:x2] = final_face
+    final_image = add_grain(final_image, intensity=NOISE_LEVEL)
+
+    # show result
     plt.figure(figsize=(10,5))
-
-    plt.subplot(1, 2, 1)
-    plt.title("Original")
-    plt.imshow(img_rgb)
-    plt.axis('off')
-
-    plt.subplot(1, 2, 2)
+    plt.imshow(final_image, cmap='gray')
     plt.title(f"Uncanny Face (K={n_components})")
-    plt.imshow(final_image)
     plt.axis('off')
-
     plt.show()
 
 if __name__ == "__main__":
-    process_image("selfie.jpg")
+    process_image("test_selfie.jpg")
