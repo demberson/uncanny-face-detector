@@ -6,7 +6,7 @@ from mtcnn import MTCNN
 from train_pca import load_data
 
 # number of principle components (can be adjusted to change accuracy/creepiness of faces)
-n_components = 100
+n_components = 150
 
 BLUR_AMOUNT = 5
 NOISE_LEVEL = 15
@@ -16,6 +16,16 @@ def add_grain(image, intensity=10):
     noise = np.random.normal(0, intensity, (h, w)).astype('uint8')
     grainy = cv2.add(image, noise)
     return grainy
+
+def match_brightness(source, reference):
+    # calculate mean and standard deviation
+    src_mean, src_std = cv2.meanStdDev(source)
+    ref_mean, ref_std = cv2.meanStdDev(reference)
+
+    # linear transformation
+    adjustment = (source.astype('float32') - src_mean) * (ref_std / src_std) + ref_mean
+
+    return np.clip(adjustment, 0, 255).astype('uint8')
 
 def process_image(image_path, pca_model_path='models/pca_model.pkl'):
     # load pca model
@@ -70,6 +80,7 @@ def process_image(image_path, pca_model_path='models/pca_model.pkl'):
     # post-processing
     # resize image back to original size
     uncanny_face = cv2.resize(reconstruction, (x2-x1, y2-y1))
+    uncanny_face = match_brightness(uncanny_face, face_region)
     uncanny_face = cv2.normalize(uncanny_face, None, 0, 255, cv2.NORM_MINMAX).astype('uint8')
 
     # masking
