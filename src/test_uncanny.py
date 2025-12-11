@@ -6,7 +6,7 @@ from mtcnn import MTCNN
 from train_pca import load_data
 
 # number of principle components (can be adjusted to change accuracy/creepiness of faces)
-n_components = 150
+n_components = 80
 
 BLUR_AMOUNT = 5
 NOISE_LEVEL = 15
